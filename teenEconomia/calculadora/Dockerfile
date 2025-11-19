@@ -31,7 +31,11 @@ COPY . .
 RUN composer install --no-dev --optimize-autoloader --no-interaction
 
 # Instalar dependencias de NPM y compilar assets
-RUN npm install && npm run build
+RUN npm ci --include=dev
+RUN npm run build
+
+# Verificar que los assets se compilaron
+RUN ls -la public/build || echo "Warning: No build directory found"
 
 # Crear directorio de base de datos y archivo SQLite
 RUN mkdir -p database && touch database/database.sqlite
