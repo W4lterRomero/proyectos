@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AnualidadDiferidaController;
+use App\Http\Controllers\AnualidadesDiferidasController;
 
 Route::get('/', [AnualidadDiferidaController::class, 'inicio'])->name('inicio');
 Route::get('/documentacion', [AnualidadDiferidaController::class, 'documentacion'])->name('documentacion');

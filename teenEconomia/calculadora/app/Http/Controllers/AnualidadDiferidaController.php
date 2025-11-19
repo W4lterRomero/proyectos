@@ -3,9 +3,19 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Services\AnualidadDiferidaService;
+use App\Services\TasaInteresService;
 
 class AnualidadDiferidaController extends Controller
 {
+    protected $anualidadService;
+    protected $tasaService;
+
+    public function __construct(AnualidadDiferidaService $anualidadService, TasaInteresService $tasaService)
+    {
+        $this->anualidadService = $anualidadService;
+        $this->tasaService = $tasaService;
+    }
     public function inicio()
     {
         return view('inicio');
@@ -20,7 +30,7 @@ class AnualidadDiferidaController extends Controller
     {
         // Valores de ejemplo precargados para la primera visita
         $entradas = [
-            'tipo_calculo' => 'vp_vf',
+            'tipo_calculo' => 'capital',
             'monto_pago' => 500.00,
             'tasa_interes' => 5.0,
             'tipo_tasa' => 'por_periodo',
@@ -28,8 +38,11 @@ class AnualidadDiferidaController extends Controller
             'periodos_diferidos' => 2,
         ];
 
+        $opcionesTipoTasa = $this->tasaService->obtenerOpcionesTipoTasa();
+
         return view('calculadora', [
             'entradas' => $entradas,
+            'opcionesTipoTasa' => $opcionesTipoTasa,
         ]);
     }
 
@@ -43,6 +56,21 @@ class AnualidadDiferidaController extends Controller
         ];
 
         switch ($tipoCalculo) {
+            case 'capital':
+                $reglas = $reglasBase + [
+                    'monto_pago' => ['required', 'numeric', 'gt:0'],
+                    'numero_pagos' => ['required', 'integer', 'min:1'],
+                    'periodos_diferidos' => ['required', 'integer', 'min:0'],
+                ];
+                break;
+
+            case 'monto':
+                $reglas = $reglasBase + [
+                    'monto_pago' => ['required', 'numeric', 'gt:0'],
+                    'numero_pagos' => ['required', 'integer', 'min:1'],
+                ];
+                break;
+
             case 'pago':
                 $reglas = $reglasBase + [
                     'valor_presente' => ['required', 'numeric', 'gt:0'],
@@ -67,59 +95,36 @@ class AnualidadDiferidaController extends Controller
                 ];
                 break;
 
-            case 'vp_vf':
             default:
                 $reglas = $reglasBase + [
                     'monto_pago' => ['required', 'numeric', 'gt:0'],
                     'numero_pagos' => ['required', 'integer', 'min:1'],
                     'periodos_diferidos' => ['required', 'integer', 'min:0'],
                 ];
-                $tipoCalculo = 'vp_vf';
+                $tipoCalculo = 'capital';
         }
 
         $validated = $request->validate($reglas);
         $validated['tipo_calculo'] = $tipoCalculo;
 
-        // Conversión de la tasa ingresada a tasa efectiva por periodo
+        // Conversión de la tasa usando el servicio
         $tasaIngresada = (float) $validated['tasa_interes'];
         $tipoTasa = $validated['tipo_tasa'] ?? 'por_periodo';
 
-        $tasaInteres = $tasaIngresada / 100.0;
-        $descripcionTasa = 'Tasa por periodo (ya convertida)';
-
-        switch ($tipoTasa) {
-            case 'anual_mensual':
-                $tasaInteres = ($tasaIngresada / 100.0) / 12.0;
-                $descripcionTasa = 'Tasa anual convertible mensualmente';
-                break;
-            case 'anual_trimestral':
-                $tasaInteres = ($tasaIngresada / 100.0) / 4.0;
-                $descripcionTasa = 'Tasa anual convertible trimestralmente';
-                break;
-            case 'anual_semestral':
-                $tasaInteres = ($tasaIngresada / 100.0) / 2.0;
-                $descripcionTasa = 'Tasa anual convertible semestralmente';
-                break;
-            case 'anual_diaria':
-                $tasaInteres = ($tasaIngresada / 100.0) / 360.0;
-                $descripcionTasa = 'Tasa anual convertible diariamente (360 días)';
-                break;
-            case 'anual_diaria_365':
-                $tasaInteres = ($tasaIngresada / 100.0) / 365.0;
-                $descripcionTasa = 'Tasa anual convertible diariamente (365 días)';
-                break;
-            case 'por_periodo':
-            default:
-                $tasaInteres = $tasaIngresada / 100.0;
-                $descripcionTasa = 'Tasa por periodo (ya convertida)';
-                $tipoTasa = 'por_periodo';
+        try {
+            $tasaInfo = $this->tasaService->convertirTasaAPeriodo($tasaIngresada, $tipoTasa);
+            $tasaInteres = $tasaInfo['tasa_periodo'];
+        } catch (\InvalidArgumentException $e) {
+            return back()
+                ->withInput()
+                ->withErrors(['tasa_interes' => $e->getMessage()]);
         }
 
         $resultado = [
             'modo' => $tipoCalculo,
             'tasa_detalle' => [
-                'tipo' => $tipoTasa,
-                'descripcion' => $descripcionTasa,
+                'tipo' => $tasaInfo['tipo'],
+                'descripcion' => $tasaInfo['descripcion'],
                 'tasa_ingresada' => $tasaIngresada,
                 'tasa_periodo' => round($tasaInteres * 100, 6),
             ],
@@ -128,103 +133,328 @@ class AnualidadDiferidaController extends Controller
         $pasos = [];
 
         // Cálculo principal según el modo seleccionado
-        if ($tipoCalculo === 'vp_vf') {
-            $montoPago = (float) $validated['monto_pago'];
-            $numeroPagos = (int) $validated['numero_pagos'];
-            $periodosDiferidos = (int) $validated['periodos_diferidos'];
+        if ($tipoCalculo === 'capital') {
+            $r = (float) $validated['monto_pago'];
+            $n = (int) $validated['numero_pagos'];
+            $k = (int) $validated['periodos_diferidos'];
+            $i = $tasaInteres;
 
-            $factorAnualidad = (1 - pow(1 + $tasaInteres, -$numeroPagos)) / $tasaInteres;
-            $valorPresente = $montoPago * $factorAnualidad * pow(1 + $tasaInteres, -$periodosDiferidos);
-            $valorFuturo = $montoPago * ((pow(1 + $tasaInteres, $numeroPagos) - 1) / $tasaInteres);
+            try {
+                // Usar el servicio para calcular solo el capital
+                $resultadoCalculo = $this->anualidadService->calcularCapital($r, $n, $k, $i);
 
-            $resultado['valor_presente'] = $valorPresente;
-            $resultado['valor_futuro'] = $valorFuturo;
+                $capital = $resultadoCalculo['capital'];
+                $cTemporal = $resultadoCalculo['c_temporal'];
 
-            $pasos[] = 'Se convierte la tasa ingresada a decimal por periodo: <code>i = ' . sprintf('%.6f', $tasaInteres) . '</code>.';
-            $pasos[] = 'Se calcula el factor de anualidad: <code>A = (1 - (1 + i)^{-n}) / i</code> con '
-                . '<code>R = ' . $montoPago . '</code>, <code>n = ' . $numeroPagos . '</code>.';
-            $pasos[] = 'Se obtiene el valor presente diferido: <code>VP = R · A · (1 + i)^{-k}</code> con '
-                . '<code>k = ' . $periodosDiferidos . '</code>, resultando aproximadamente <strong>'
-                . number_format($valorPresente, 2, ',', '.') . '</strong>.';
-            $pasos[] = 'Se obtiene el valor futuro: <code>VF = R · ((1 + i)^{n} - 1) / i</code>, resultando aproximadamente <strong>'
-                . number_format($valorFuturo, 2, ',', '.') . '</strong>.';
+                $resultado['valor_presente'] = $capital;
+
+                // Generar pasos
+                $pasos[] = '<strong>Datos de entrada:</strong>';
+                $pasos[] =
+                    '• Renta \(R\): $' . number_format($r, 2) . '<br>' .
+                    '• Número de pagos \(n\): ' . $n . '<br>' .
+                    '• Tasa de interés \(i\): ' . sprintf('%.6f', $i) . ' (' . sprintf('%.4f', $i * 100) . '% por período)<br>' .
+                    '• Períodos diferidos \(k\): ' . $k;
+
+                // Paso 1: C_temporal
+                $pasos[] = '<strong>Paso 1: Calcular capital equivalente de la anualidad vencida al final del período diferido</strong><br>';
+                $pasos[] = '\\[ C_{\\text{temporal}} = R \\cdot \\frac{1 - (1 + i)^{-n}}{i} \\]';
+                $pasos[] =
+                    '\\[ C_{\\text{temporal}} = ' . number_format($r, 2) .
+                    ' \\cdot \\frac{1 - (1 + ' . sprintf('%.6f', $i) . ')^{-' . $n . '}}{' . sprintf('%.6f', $i) . '} \\approx ' .
+                    number_format($cTemporal, 2) . ' \\]';
+
+                // Paso 2: trasladar al tiempo 0
+                $pasos[] = '<strong>Paso 2: Trasladar el capital al tiempo 0 (inicio)</strong><br>';
+                $pasos[] = '\\[ C = C_{\\text{temporal}} \\cdot (1 + i)^{-k} \\]';
+                $pasos[] =
+                    '\\[ C = ' . number_format($cTemporal, 2) .
+                    ' \\cdot (1 + ' . sprintf('%.6f', $i) . ')^{-' . $k . '} \\approx ' .
+                    number_format($capital, 2) . ' \\]';
+
+                $pasos[] =
+                    '<strong>Resultado Final - Capital (C):</strong> ' .
+                    '<span class="text-blue-700 font-bold text-lg">$' . number_format($capital, 2) . '</span>';
+            } catch (\Exception $e) {
+                return back()
+                    ->withInput()
+                    ->withErrors(['monto_pago' => 'Error en el cálculo: ' . $e->getMessage()]);
+            }
+        } elseif ($tipoCalculo === 'monto') {
+            $r = (float) $validated['monto_pago'];
+            $n = (int) $validated['numero_pagos'];
+            $i = $tasaInteres;
+
+            try {
+                // Usar el servicio para calcular solo el monto
+                $resultadoCalculo = $this->anualidadService->calcularMonto($r, $n, $i);
+
+                $monto = $resultadoCalculo['monto'];
+
+                $resultado['valor_futuro'] = $monto;
+
+                // Generar pasos
+                $pasos[] = '<strong>Datos de entrada:</strong>';
+                $pasos[] =
+                    '• Renta \(R\): $' . number_format($r, 2) . '<br>' .
+                    '• Número de pagos \(n\): ' . $n . '<br>' .
+                    '• Tasa de interés \(i\): ' . sprintf('%.6f', $i) . ' (' . sprintf('%.4f', $i * 100) . '% por período)';
+
+                // Cálculo del monto
+                $pasos[] = '<strong>Cálculo del monto (M):</strong><br>';
+                $pasos[] = '\\[ M = R \\cdot \\frac{(1 + i)^{n} - 1}{i} \\]';
+                $pasos[] =
+                    '\\[ M = ' . number_format($r, 2) .
+                    ' \\cdot \\frac{(1 + ' . sprintf('%.6f', $i) . ')^{' . $n . '} - 1}{' . sprintf('%.6f', $i) . '} \\approx ' .
+                    number_format($monto, 2) . ' \\]';
+
+                $pasos[] =
+                    '<strong>Resultado Final - Monto (M):</strong> ' .
+                    '<span class="text-indigo-700 font-bold text-lg">$' . number_format($monto, 2) . '</span>';
+            } catch (\Exception $e) {
+                return back()
+                    ->withInput()
+                    ->withErrors(['monto_pago' => 'Error en el cálculo: ' . $e->getMessage()]);
+            }
         } elseif ($tipoCalculo === 'pago') {
-            $valorPresente = (float) $validated['valor_presente'];
-            $numeroPagos = (int) $validated['numero_pagos'];
-            $periodosDiferidos = (int) $validated['periodos_diferidos'];
+            $c = (float) $validated['valor_presente'];
+            $n = (int) $validated['numero_pagos'];
+            $k = (int) $validated['periodos_diferidos'];
+            $i = $tasaInteres;
 
-            $factorAnualidad = (1 - pow(1 + $tasaInteres, -$numeroPagos)) / $tasaInteres;
-            $denominador = $factorAnualidad * pow(1 + $tasaInteres, -$periodosDiferidos);
+            try {
+                // Usar el servicio para calcular el pago
+                $resultadoCalculo = $this->anualidadService->calcularPago($c, $n, $k, $i);
 
-            if ($denominador <= 0) {
+                $r = $resultadoCalculo['renta'];
+                $vpFinal = $resultadoCalculo['vp_final'];
+                $monto = $resultadoCalculo['monto'];
+
+                $resultado['monto_pago'] = $r;
+                $resultado['valor_presente'] = $c;
+                $resultado['valor_futuro'] = $monto;
+
+                $pasos[] = '<strong>Datos de entrada:</strong>';
+                $pasos[] =
+                    '• Capital conocido \(C\): $' . number_format($c, 2) . '<br>' .
+                    '• Número de pagos \(n\): ' . $n . '<br>' .
+                    '• Tasa de interés \(i\): ' . sprintf('%.6f', $i) . ' (' . sprintf('%.4f', $i * 100) . '% por período)<br>' .
+                    '• Períodos diferidos \(k\): ' . $k;
+
+                $pasos[] = '<strong>Paso 1: Llevar el capital hasta el final del período de diferimiento</strong><br>';
+                $pasos[] = '\\[ VP_{\\text{final}} = C (1 + i)^{k} \\]';
+                $pasos[] =
+                    '\\[ VP_{\\text{final}} = ' . number_format($c, 2) .
+                    ' \\cdot (1 + ' . sprintf('%.6f', $i) . ')^{' . $k . '} \\approx ' .
+                    number_format($vpFinal, 2) . ' \\]';
+
+                $pasos[] = '<strong>Paso 2: Aplicar la fórmula de anualidad vencida y despejar R</strong><br>';
+                $pasos[] = '\\[ VP_{\\text{final}} = R \\cdot \\frac{1 - (1 + i)^{-n}}{i} \\]';
+                $pasos[] = '\\[ R = VP_{\\text{final}} \\cdot \\frac{i}{1 - (1 + i)^{-n}} \\]';
+                $pasos[] =
+                    '\\[ R = ' . number_format($vpFinal, 2) .
+                    ' \\cdot \\frac{' . sprintf('%.6f', $i) . '}{1 - (1 + ' . sprintf('%.6f', $i) . ')^{-' . $n . '}} \\approx ' .
+                    number_format($r, 2) . ' \\]';
+
+                $pasos[] =
+                    '<strong>Resultado Final - Renta (R):</strong> ' .
+                    '<span class="text-emerald-700 font-bold text-lg">$' . number_format($r, 2) . '</span>';
+
+                $pasos[] = '<hr class="my-4">';
+
+                $pasos[] = '<strong>Monto futuro asociado:</strong><br>';
+                $pasos[] = '\\[ M = R \\cdot \\frac{(1 + i)^{n} - 1}{i} \\]';
+                $pasos[] =
+                    '\\[ M = ' . number_format($r, 2) .
+                    ' \\cdot \\frac{(1 + ' . sprintf('%.6f', $i) . ')^{' . $n . '} - 1}{' . sprintf('%.6f', $i) . '} \\approx ' .
+                    number_format($monto, 2) . ' \\]';
+            } catch (\Exception $e) {
                 return back()
                     ->withInput()
-                    ->withErrors(['valor_presente' => 'Los datos proporcionados no permiten calcular un pago periódico válido.']);
+                    ->withErrors(['valor_presente' => $e->getMessage()]);
             }
-
-            $montoPago = $valorPresente / $denominador;
-            $valorFuturo = $montoPago * ((pow(1 + $tasaInteres, $numeroPagos) - 1) / $tasaInteres);
-
-            $resultado['monto_pago'] = $montoPago;
-            $resultado['valor_presente'] = $valorPresente;
-            $resultado['valor_futuro'] = $valorFuturo;
-
-            $pasos[] = 'Se convierte la tasa ingresada a decimal por periodo: <code>i = ' . sprintf('%.6f', $tasaInteres) . '</code>.';
-            $pasos[] = 'Se calcula el factor de anualidad: <code>A = (1 - (1 + i)^{-n}) / i</code> con '
-                . '<code>n = ' . $numeroPagos . '</code>.';
-            $pasos[] = 'Se despeja el pago periódico a partir de <code>VP = R · A · (1 + i)^{-k}</code>: '
-                . '<code>R = VP / (A · (1 + i)^{-k})</code>, obteniendo aproximadamente <strong>'
-                . number_format($montoPago, 2, ',', '.') . '</strong>.';
         } elseif ($tipoCalculo === 'numero_pagos') {
-            $montoPago = (float) $validated['monto_pago'];
-            $valorPresente = (float) $validated['valor_presente'];
-            $periodosDiferidos = (int) $validated['periodos_diferidos'];
+            $r = (float) $validated['monto_pago'];
+            $c = (float) $validated['valor_presente'];
+            $k = (int) $validated['periodos_diferidos'];
+            $i = $tasaInteres;
 
-            $factorDiferido = pow(1 + $tasaInteres, -$periodosDiferidos);
-            $base = ($valorPresente * $tasaInteres) / ($montoPago * $factorDiferido);
+            try {
+                // Usar el servicio para calcular número de pagos
+                $resultadoCalculo = $this->anualidadService->calcularNumeroPagos($c, $r, $k, $i);
 
-            if ($base <= 0 || $base >= 1) {
+                $nReal = $resultadoCalculo['n_real'];
+                $nEntero = $resultadoCalculo['n_piso'];
+                $pagoFinal = $resultadoCalculo['pago_final'];
+                $vpFinal = $resultadoCalculo['vp_final'];
+                $montoAcumulado = $resultadoCalculo['monto_acumulado'];
+                $sumaPagos = $resultadoCalculo['suma_pagos'];
+
+                $resultado['numero_pagos'] = $nReal;
+                $resultado['numero_pagos_entero'] = $resultadoCalculo['n_entero'];
+                $resultado['n_piso'] = $nEntero;
+                $resultado['pago_final'] = $pagoFinal;
+
+                $pasos[] = '<strong>Datos de entrada:</strong>';
+                $pasos[] =
+                    '• Capital conocido \(C\): $' . number_format($c, 2) . '<br>' .
+                    '• Renta \(R\): $' . number_format($r, 2) . '<br>' .
+                    '• Tasa de interés \(i\): ' . sprintf('%.6f', $i) . ' (' . sprintf('%.4f', $i * 100) . '% por período)<br>' .
+                    '• Períodos diferidos \(k\): ' . $k;
+
+                $pasos[] = '<strong>Paso 1: Calcular el capital al final del período diferido</strong><br>';
+                $pasos[] = '\\[ VP_{\\text{final}} = C (1 + i)^{k} \\]';
+                $pasos[] =
+                    '\\[ VP_{\\text{final}} = ' . number_format($c, 2) .
+                    ' \\cdot (1 + ' . sprintf('%.6f', $i) . ')^{' . $k . '} \\approx ' .
+                    number_format($vpFinal, 2) . ' \\]';
+
+                $pasos[] = '<strong>Paso 2: Plantear la ecuación de anualidad vencida</strong><br>';
+                $pasos[] = '\\[ VP_{\\text{final}} = R \\cdot \\frac{1 - (1 + i)^{-n}}{i} \\]';
+
+                $pasos[] = '<strong>Paso 3: Despejar n usando logaritmos</strong><br>';
+                $pasos[] = '\\[ n = - \\frac{\\ln\\left( 1 - \\dfrac{VP_{\\text{final}} \\cdot i}{R} \\right)}{\\ln(1 + i)} \\]';
+                $pasos[] =
+                    '\\[ n = - \\frac{\\ln\\left( 1 - \\dfrac{' . number_format($vpFinal, 2) . ' \\cdot ' . sprintf('%.6f', $i) .
+                    '}{' . number_format($r, 2) . '} \\right)}{\\ln(1 + ' . sprintf('%.6f', $i) . ')} \\approx ' .
+                    sprintf('%.6f', $nReal) . ' \\text{ pagos} \\]';
+
+                $pasos[] =
+                    '<strong>Resultado: n = ' . sprintf('%.6f', $nReal) . ' pagos</strong>';
+
+                $pasos[] = '<hr class="my-4">';
+
+                $pasos[] = '<strong>Interpretación del resultado decimal:</strong><br>'
+                    . '<span class="text-cyan-700"><strong>Opción A:</strong></span> Hacer ' . $nEntero . ' pagos completos de $' . number_format($r, 2)
+                    . ' + 1 pago final de <strong>$' . number_format($pagoFinal, 2) . '</strong><br>'
+                    . '<span class="text-blue-700"><strong>Opción B:</strong></span> Redondear a ' . ceil($nReal) . ' pagos completos';
+
+                $pasos[] = '<strong>Desglose Opción A:</strong><br>'
+                    . '• Monto acumulado después de ' . $nEntero . ' períodos: $' . number_format($montoAcumulado, 2) . '<br>'
+                    . '• Suma de ' . $nEntero . ' pagos: $' . number_format($sumaPagos, 2) . '<br>'
+                    . '• Saldo restante · (1+i): $' . number_format($pagoFinal, 2);
+            } catch (\Exception $e) {
                 return back()
                     ->withInput()
-                    ->withErrors(['valor_presente' => 'Los datos proporcionados no permiten calcular un número de pagos válido.']);
+                    ->withErrors(['valor_presente' => $e->getMessage()]);
             }
-
-            $potencia = 1 - $base;
-            $numeroPagosReal = -log($potencia) / log(1 + $tasaInteres);
-
-            $resultado['numero_pagos'] = $numeroPagosReal;
-            $resultado['numero_pagos_entero'] = ceil($numeroPagosReal);
-
-            $pasos[] = 'Se plantea la ecuación a partir de <code>VP = R · [(1 - (1 + i)^{-n}) / i] · (1 + i)^{-k}</code> y se despeja <code>n</code> usando logaritmos.';
-            $pasos[] = 'El número de pagos obtenido es <strong>' . number_format($numeroPagosReal, 2, ',', '.') . '</strong>, '
-                . 'que se aproxima al entero <strong>' . ceil($numeroPagosReal) . '</strong>.';
         } elseif ($tipoCalculo === 'periodos_diferidos') {
-            $montoPago = (float) $validated['monto_pago'];
-            $valorPresente = (float) $validated['valor_presente'];
-            $numeroPagos = (int) $validated['numero_pagos'];
+            $r = (float) $validated['monto_pago'];
+            $c = (float) $validated['valor_presente'];
+            $n = (int) $validated['numero_pagos'];
+            $i = $tasaInteres;
 
-            $factorAnualidad = (1 - pow(1 + $tasaInteres, -$numeroPagos)) / $tasaInteres;
-            $base = ($valorPresente) / ($montoPago * $factorAnualidad);
+            try {
+                // Usar el servicio para calcular períodos diferidos
+                $resultadoCalculo = $this->anualidadService->calcularPeriodosDiferidos($c, $r, $n, $i);
 
-            if ($base <= 0) {
+                $kReal = $resultadoCalculo['k_real'];
+
+                $resultado['periodos_diferidos'] = $kReal;
+                $resultado['periodos_diferidos_entero'] = $resultadoCalculo['k_entero'];
+
+                $pasos[] = '<strong>Datos de entrada:</strong>';
+                $pasos[] =
+                    '• Capital conocido \(C\): $' . number_format($c, 2) . '<br>' .
+                    '• Renta \(R\): $' . number_format($r, 2) . '<br>' .
+                    '• Número de pagos \(n\): ' . $n . '<br>' .
+                    '• Tasa de interés \(i\): ' . sprintf('%.6f', $i) . ' (' . sprintf('%.4f', $i * 100) . '% por período)';
+
+                $pasos[] = '<strong>Paso único: despejar k de la ecuación del capital</strong><br>';
+                $pasos[] = '\\[ C = R \\cdot \\frac{1 - (1 + i)^{-n}}{i} \\cdot (1 + i)^{-k} \\]';
+                $pasos[] = '\\[ k = - \\frac{\\ln\\left( \\dfrac{C \\cdot i}{R \\cdot (1 - (1 + i)^{-n})} \\right)}{\\ln(1 + i)} \\]';
+                $pasos[] =
+                    '\\[ k = - \\frac{\\ln\\left( \\dfrac{' . number_format($c, 2) . ' \\cdot ' . sprintf('%.6f', $i) .
+                    '}{' . number_format($r, 2) . ' \\cdot (1 - (1 + ' . sprintf('%.6f', $i) . ')^{-' . $n . '})} \\right)}{\\ln(1 + ' . sprintf('%.6f', $i) . ')} \\approx ' .
+                    number_format($kReal, 2) . ' \\]';
+            } catch (\Exception $e) {
                 return back()
                     ->withInput()
-                    ->withErrors(['valor_presente' => 'Los datos proporcionados no permiten calcular periodos diferidos válidos.']);
+                    ->withErrors(['valor_presente' => $e->getMessage()]);
             }
-
-            $periodosDiferidosReal = -log($base) / log(1 + $tasaInteres);
-
-            $resultado['periodos_diferidos'] = $periodosDiferidosReal;
-            $resultado['periodos_diferidos_entero'] = ceil($periodosDiferidosReal);
-
-            $pasos[] = 'Se plantea la ecuación a partir de <code>VP = R · [(1 - (1 + i)^{-n}) / i] · (1 + i)^{-k}</code> y se despeja <code>k</code> usando logaritmos.';
-            $pasos[] = 'Los periodos de diferimiento obtenidos son <strong>' . number_format($periodosDiferidosReal, 2, ',', '.') . '</strong>, '
-                . 'que se aproximan al entero <strong>' . ceil($periodosDiferidosReal) . '</strong>.';
         }
+
+        $opcionesTipoTasa = $this->tasaService->obtenerOpcionesTipoTasa();
 
         return view('calculadora', [
             'resultado' => array_merge($resultado, ['pasos' => $pasos]),
             'entradas' => $validated,
+            'opcionesTipoTasa' => $opcionesTipoTasa,
         ]);
     }
+
+    /**
+     * Calcula el capital (C) de una anualidad diferida
+     * para una tasa de interés i dada:
+     * C = R · [1 - (1+i)^(-n)] / i · (1+i)^(-k)
+     */
+    protected function calcularVPConTasa(float $r, int $n, int $k, float $i): float
+    {
+        if ($i <= 0.0) {
+            throw new \InvalidArgumentException('La tasa debe ser mayor que 0.');
+        }
+
+        $factorAnualidad = (1 - pow(1 + $i, -$n)) / $i;
+
+        return $r * $factorAnualidad * pow(1 + $i, -$k);
+    }
+
+    /**
+     * Calcula la tasa de interés i de una anualidad diferida
+     * usando el método de bisección sobre:
+     * C = R · [1 - (1+i)^(-n)] / i · (1+i)^(-k)
+     */
+    protected function calcularTasaPorBiseccion(float $c, float $r, int $n, int $k): array
+    {
+        if ($c <= 0.0) {
+            throw new \InvalidArgumentException('El valor presente debe ser mayor que 0.');
+        }
+
+        if ($r <= 0.0) {
+            throw new \InvalidArgumentException('La renta debe ser mayor que 0.');
+        }
+
+        if ($n <= 0) {
+            throw new \InvalidArgumentException('El número de pagos debe ser positivo.');
+        }
+
+        if ($k < 0) {
+            throw new \InvalidArgumentException('Los periodos diferidos no pueden ser negativos.');
+        }
+
+        $iMin = 0.0001; // 0.01 %
+        $iMax = 0.5;    // 50 %
+        $precision = 0.000001;
+        $maxIter = 200;
+        $iteraciones = [];
+
+        $iMedio = $iMin;
+
+        for ($iter = 0; $iter < $maxIter && ($iMax - $iMin) > $precision; $iter++) {
+            $iMedio = ($iMin + $iMax) / 2.0;
+            $vpCalculado = $this->calcularVPConTasa($r, $n, $k, $iMedio);
+
+            $iteraciones[] = [
+                'i' => $iMedio,
+                'vp_calculado' => $vpCalculado,
+                'diferencia' => $c - $vpCalculado,
+            ];
+
+            if (abs($vpCalculado - $c) < $precision) {
+                break;
+            }
+
+            if ($vpCalculado > $c) {
+                $iMin = $iMedio;
+            } else {
+                $iMax = $iMedio;
+            }
+        }
+
+        return [
+            'i' => $iMedio,
+            'iteraciones' => $iteraciones,
+        ];
+    }
 }
+
