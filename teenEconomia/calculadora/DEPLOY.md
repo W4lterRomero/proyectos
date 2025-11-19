@@ -16,7 +16,18 @@
    git push origin master
    ```
 
-3. **Crear Web Service en Render**
+3. **Crear Web Service ePP_NAME=CalculadoraFinanciera
+APP_ENV=production
+APP_DEBUG=false
+APP_KEY=base64:MZcYnbLKG2Yloz1XTs11v/UnDfSTArWAj2Xu47e5hKo=
+APP_URL=https://calculadoraanualidadesdiferidas.onrender.com
+ASSET_URL=https://calculadoraanualidadesdiferidas.onrender.com
+LOG_CHANNEL=errorlog
+SESSION_DRIVER=file
+CACHE_STORE=file
+QUEUE_CONNECTION=sync
+DB_CONNECTION=sqlite
+DB_DATABASE=/var/www/html/database/database.sqliten Render**
    - Haz clic en "New +" y selecciona "Web Service"
    - Conecta tu repositorio de GitHub
    - IMPORTANTE: Configuración manual (NO uses render.yaml por ahora):
