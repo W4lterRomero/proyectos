@@ -12,7 +12,7 @@
                         Calculadora de anualidades diferidas
                     </h1>
                     <p class="text-sm text-slate-600">
-                        Calcula VP, VF, R, n o k según los datos del ejercicio.
+                        Calcula Capital, Monto, Renta n o k según los datos del ejercicio.
                     </p>
                 </div>
 
@@ -30,18 +30,18 @@
                 </div>
             </div>
 
-            <!-- Formulario -->
+            <!-- Formulario principal -->
             <div class="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-100">
                 <form id="form-anualidad" method="POST" action="{{ route('calculadora.calcular') }}" class="p-6 sm:p-8 space-y-6">
                     @csrf
 
                     <!-- Tipo de cálculo -->
                     <div>
-                        <div class="rounded-xl p-4 border border-slate-200 bg-slate-50 mb-4">
-                            <label for="tipo_calculo" class="block text-sm font-semibold text-gray-800 mb-2">
-                                <span class="inline-block bg-blue-600 text-white text-xs font-bold px-2.5 py-0.5 rounded-full mr-2">PASO 1</span>
+                        <label for="tipo_calculo" class="block  font-semibold text-gray-800 mb-2 inline-block bg-blue-600 text-white text-xs font-bold px-2.5 py-0.5 rounded-full mr-2">
                                 Tipo de cálculo
                             </label>
+                        <div class="rounded-xl p-4 border border-slate-200 bg-slate-50 mb-4">
+
                             @php
                                 $tipoSeleccionado = old('tipo_calculo', $entradas['tipo_calculo'] ?? 'capital');
                             @endphp
@@ -51,19 +51,19 @@
                                 name="tipo_calculo"
                             >
                                 <option value="capital" {{ $tipoSeleccionado === 'capital' ? 'selected' : '' }}>
-                                    Calcular capital C (conocidos R, i, n, k)
+                                    Calcular capital C
                                 </option>
                                 <option value="monto" {{ $tipoSeleccionado === 'monto' ? 'selected' : '' }}>
-                                    Calcular monto M (conocidos R, i, n)
+                                    Calcular monto M
                                 </option>
                                 <option value="pago" {{ $tipoSeleccionado === 'pago' ? 'selected' : '' }}>
-                                    Calcular monto de cada pago R (conocidos capital C, i, n, k)
+                                    Calcular monto de cada pago R
                                 </option>
                                 <option value="numero_pagos" {{ $tipoSeleccionado === 'numero_pagos' ? 'selected' : '' }}>
-                                    Calcular número de pagos n (conocidos capital C, R, i, k)
+                                    Calcular número de pagos n
                                 </option>
                                 <option value="periodos_diferidos" {{ $tipoSeleccionado === 'periodos_diferidos' ? 'selected' : '' }}>
-                                    Calcular periodos diferidos k (conocidos capital C, R, i, n)
+                                    Calcular periodos diferidos k
                                 </option>
                             </select>
                             <p class="text-xs text-gray-600 mt-2">
@@ -108,6 +108,9 @@
                     </div>
 
                     <!-- Campos del formulario -->
+                    <p class="text-xs text-gray-600">
+                        Completa solo los campos visibles; los demas se calculan segun el tipo de calculo elegido.
+                    </p>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                         <!-- Monto de Pago -->
                         <div class="campo-grupo" id="grupo_monto_pago">
@@ -251,7 +254,10 @@
                     <!-- Resultados -->
                     @if(isset($resultado) && is_array($resultado))
                         <div id="resultado-card" class="mt-8 bg-slate-50 border border-slate-200 rounded-xl p-6 space-y-3">
-                            <h2 class="text-sm font-semibold text-slate-900 mb-2">Resultado</h2>
+                            <h2 class="text-sm font-semibold text-slate-900 mb-1">Resultado principal</h2>
+                            <p class="text-xs text-slate-600 mb-2">
+                                Aqui veras la variable que elegiste calcular y, mas abajo, los pasos usados en el procedimiento.
+                            </p>
 
                             @php
                                 $modo = $resultado['modo'] ?? null;
@@ -318,7 +324,7 @@
                             @if(!empty($pasos))
                                 <div class="border-t border-slate-200 pt-3 mt-2">
                                     <p class="text-xs font-semibold text-slate-900 mb-2">Pasos del cálculo</p>
-                                    <div class="text-xs text-slate-700 leading-relaxed space-y-2">
+                                    <div class="text-xs text-slate-700 leading-relaxed space-y-2 break-words whitespace-normal overflow-x-auto">
                                         @foreach($pasos as $paso)
                                             <p>{!! $paso !!}</p>
                                         @endforeach
