@@ -34,6 +34,8 @@
    APP_ENV=production
    APP_DEBUG=false
    APP_KEY=base64:GENERADO_AUTOMATICAMENTE
+   APP_URL=https://tu-app-name.onrender.com
+   ASSET_URL=https://tu-app-name.onrender.com
    LOG_CHANNEL=errorlog
    SESSION_DRIVER=file
    CACHE_STORE=file
@@ -41,6 +43,8 @@
    DB_CONNECTION=sqlite
    DB_DATABASE=/var/www/html/database/database.sqlite
    ```
+
+   **IMPORTANTE**: Reemplaza `tu-app-name.onrender.com` con la URL real que Render te asigne.
 
    Para generar `APP_KEY`, ejecuta localmente:
    ```bash
