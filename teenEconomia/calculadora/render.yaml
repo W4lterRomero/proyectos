@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: calculadora-financiera
+    env: php
+    buildCommand: "./build.sh"
+    startCommand: "php artisan serve --host=0.0.0.0 --port=$PORT"
+    envVars:
+      - key: APP_NAME
+        value: CalculadoraFinanciera
+      - key: APP_ENV
+        value: production
+      - key: APP_DEBUG
+        value: false
+      - key: APP_KEY
+        generateValue: true
+      - key: LOG_CHANNEL
+        value: errorlog
+      - key: LOG_LEVEL
+        value: info
+      - key: SESSION_DRIVER
+        value: file
+      - key: CACHE_STORE
+        value: file
+      - key: QUEUE_CONNECTION
+        value: sync
+      - key: DB_CONNECTION
+        value: sqlite
+      - key: DB_DATABASE
+        value: /opt/render/project/src/database/database.sqlite
+
+databases:
+  - name: calculadora-db
+    databaseName: calculadora
+    user: calculadora_user
