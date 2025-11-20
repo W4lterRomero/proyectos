@@ -95,6 +95,16 @@ class AnualidadDiferidaController extends Controller
                 ];
                 break;
 
+            case 'tasa_interes':
+                // Para calcular tasa de interés NO necesitamos la tasa como entrada
+                $reglas = [
+                    'monto_pago' => ['required', 'numeric', 'gt:0'],
+                    'valor_presente' => ['required', 'numeric', 'gt:0'],
+                    'numero_pagos' => ['required', 'integer', 'min:1'],
+                    'periodos_diferidos' => ['required', 'integer', 'min:0'],
+                ];
+                break;
+
             default:
                 $reglas = $reglasBase + [
                     'monto_pago' => ['required', 'numeric', 'gt:0'],
@@ -371,6 +381,91 @@ class AnualidadDiferidaController extends Controller
                 return back()
                     ->withInput()
                     ->withErrors(['valor_presente' => $e->getMessage()]);
+            }
+        } elseif ($tipoCalculo === 'tasa_interes') {
+            $r = (float) $validated['monto_pago'];
+            $c = (float) $validated['valor_presente'];
+            $n = (int) $validated['numero_pagos'];
+            $k = (int) $validated['periodos_diferidos'];
+
+            try {
+                // Usar el servicio para calcular la tasa con Newton-Raphson
+                $resultadoCalculo = $this->anualidadService->calcularTasaNewtonRaphson($c, $r, $n, $k);
+
+                $iCalculada = $resultadoCalculo['tasa'];
+                $iteraciones = $resultadoCalculo['iteraciones'];
+                $convergencia = $resultadoCalculo['convergencia'];
+                $numIteraciones = $resultadoCalculo['num_iteraciones'];
+
+                $resultado['tasa_interes'] = $iCalculada;
+                $resultado['num_iteraciones'] = $numIteraciones;
+                $resultado['convergencia'] = $convergencia;
+
+                $pasos[] = '<strong>Datos de entrada:</strong>';
+                $pasos[] =
+                    '• Capital conocido \(C\): $' . number_format($c, 2) . '<br>' .
+                    '• Renta \(R\): $' . number_format($r, 2) . '<br>' .
+                    '• Número de pagos \(n\): ' . $n . '<br>' .
+                    '• Períodos diferidos \(k\): ' . $k;
+
+                $pasos[] = '<strong>Método: Newton-Raphson</strong><br>';
+                $pasos[] = 'Resolviendo la ecuación: \\[ C = R \\cdot \\frac{1 - (1 + i)^{-n}}{i} \\cdot (1 + i)^{-k} \\]';
+                $pasos[] = 'Buscamos el valor de \(i\) que satisface esta ecuación mediante iteraciones sucesivas.';
+
+                $pasos[] = '<strong>Iteraciones del método Newton-Raphson:</strong><br>';
+                $pasos[] = 'Fórmula: \\( i_{n+1} = i_n - \\frac{f(i_n)}{f\'(i_n)} \\)';
+
+                // Mostrar primeras 5 iteraciones
+                $iteracionesMostrar = array_slice($iteraciones, 0, 5);
+                $tablaIteraciones = '<table class="w-full text-xs mt-2 border-collapse">';
+                $tablaIteraciones .= '<tr class="bg-slate-100 border-b border-slate-300">';
+                $tablaIteraciones .= '<th class="p-1 text-left">Iter</th>';
+                $tablaIteraciones .= '<th class="p-1 text-right">i (tasa)</th>';
+                $tablaIteraciones .= '<th class="p-1 text-right">VP calculado</th>';
+                $tablaIteraciones .= '<th class="p-1 text-right">Error</th>';
+                $tablaIteraciones .= '</tr>';
+
+                foreach ($iteracionesMostrar as $iter) {
+                    $tablaIteraciones .= '<tr class="border-b border-slate-200">';
+                    $tablaIteraciones .= '<td class="p-1">' . $iter['iteracion'] . '</td>';
+                    $tablaIteraciones .= '<td class="p-1 text-right">' . number_format($iter['i'] * 100, 6) . '%</td>';
+                    $tablaIteraciones .= '<td class="p-1 text-right">$' . number_format($iter['vp_calculado'], 2) . '</td>';
+                    $tablaIteraciones .= '<td class="p-1 text-right">$' . number_format($iter['error_absoluto'], 2) . '</td>';
+                    $tablaIteraciones .= '</tr>';
+                }
+
+                if (count($iteraciones) > 5) {
+                    $tablaIteraciones .= '<tr><td colspan="4" class="p-1 text-center text-slate-500">...</td></tr>';
+                    $ultima = end($iteraciones);
+                    $tablaIteraciones .= '<tr class="border-b border-slate-200 bg-green-50">';
+                    $tablaIteraciones .= '<td class="p-1 font-semibold">' . $ultima['iteracion'] . '</td>';
+                    $tablaIteraciones .= '<td class="p-1 text-right font-semibold">' . number_format($ultima['i'] * 100, 6) . '%</td>';
+                    $tablaIteraciones .= '<td class="p-1 text-right font-semibold">$' . number_format($ultima['vp_calculado'], 2) . '</td>';
+                    $tablaIteraciones .= '<td class="p-1 text-right font-semibold">$' . number_format($ultima['error_absoluto'], 6) . '</td>';
+                    $tablaIteraciones .= '</tr>';
+                }
+
+                $tablaIteraciones .= '</table>';
+                $pasos[] = $tablaIteraciones;
+
+                $pasos[] =
+                    '<strong>Resultado Final - Tasa de interés (i):</strong> ' .
+                    '<span class="text-orange-700 font-bold text-lg">' . number_format($iCalculada * 100, 6) . '% por período</span>';
+
+                $pasos[] = '<strong>Estado de convergencia:</strong> ' . $convergencia;
+                $pasos[] = '<strong>Número de iteraciones:</strong> ' . $numIteraciones;
+
+                // Verificación
+                $vpVerificacion = $r * ((1 - pow(1 + $iCalculada, -$n)) / $iCalculada) * pow(1 + $iCalculada, -$k);
+                $pasos[] = '<hr class="my-4">';
+                $pasos[] = '<strong>Verificación:</strong><br>';
+                $pasos[] = '• Capital ingresado: $' . number_format($c, 2) . '<br>';
+                $pasos[] = '• VP con tasa calculada: $' . number_format($vpVerificacion, 2) . '<br>';
+                $pasos[] = '• Diferencia: $' . number_format(abs($c - $vpVerificacion), 6);
+            } catch (\Exception $e) {
+                return back()
+                    ->withInput()
+                    ->withErrors(['monto_pago' => 'Error en el cálculo: ' . $e->getMessage()]);
             }
         }
 

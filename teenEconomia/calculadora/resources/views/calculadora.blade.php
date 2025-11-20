@@ -6,24 +6,24 @@
     <div class="py-4">
         <div class="max-w-4xl mx-auto space-y-6">
             <!-- Encabezado -->
-            <div class="bg-white rounded-2xl shadow-sm overflow-hidden border border-slate-100">
-                <div class="px-6 sm:px-8 py-6 border-b border-slate-100 bg-slate-50">
-                    <h1 class="text-2xl sm:text-3xl font-semibold text-slate-900 mb-1">
+            <div class="bg-white dark:bg-slate-800 rounded-2xl shadow-sm overflow-hidden border border-slate-100 dark:border-slate-700">
+                <div class="px-6 sm:px-8 py-6 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+                    <h1 class="text-2xl sm:text-3xl font-semibold text-slate-900 dark:text-white mb-1">
                         Calculadora de anualidades diferidas
                     </h1>
-                    <p class="text-sm text-slate-600">
+                    <p class="text-sm text-slate-600 dark:text-slate-400">
                         Calcula Capital, Monto, Renta n o k según los datos del ejercicio.
                     </p>
                 </div>
 
                 <div class="px-6 sm:px-8 py-6 space-y-3">
-                    <p class="text-gray-700 leading-relaxed text-sm md:text-base">
-                        Esta calculadora permite trabajar con <strong>anualidades diferidas</strong>:
-                        puedes obtener el <strong>capital o valor presente (C)</strong>, el <strong>monto o valor futuro (M)</strong>,
-                        el <strong>monto de cada pago (R)</strong>, el <strong>número de pagos (n)</strong> o los
-                        <strong>periodos de diferimiento (k)</strong>, según la información que tengas.
+                    <p class="text-gray-700 dark:text-slate-300 leading-relaxed text-sm md:text-base">
+                        Esta calculadora permite trabajar con <strong class="font-bold text-blue-700 dark:text-blue-300">anualidades diferidas</strong>:
+                        puedes obtener el <strong class="font-bold text-blue-700 dark:text-blue-300">capital o valor presente (C)</strong>, el <strong class="font-bold text-blue-700 dark:text-blue-300">monto o valor futuro (M)</strong>,
+                        el <strong class="font-bold text-blue-700 dark:text-blue-300">monto de cada pago (R)</strong>, el <strong class="font-bold text-blue-700 dark:text-blue-300">número de pagos (n)</strong> o los
+                        <strong class="font-bold text-blue-700 dark:text-blue-300">periodos de diferimiento (k)</strong>, según la información que tengas.
                     </p>
-                    <p class="text-gray-600 text-xs md:text-sm">
+                    <p class="text-gray-600 dark:text-slate-400 text-xs md:text-sm">
                         En todos los casos se asume una anualidad vencida (pagos al final de cada periodo) con tasa
                         de interés constante por periodo.
                     </p>
@@ -64,6 +64,9 @@
                                 </option>
                                 <option value="periodos_diferidos" {{ $tipoSeleccionado === 'periodos_diferidos' ? 'selected' : '' }}>
                                     Calcular periodos diferidos k
+                                </option>
+                                <option value="tasa_interes" {{ $tipoSeleccionado === 'tasa_interes' ? 'selected' : '' }}>
+                                    Calcular tasa de interés i (Newton-Raphson)
                                 </option>
                             </select>
                             <p class="text-xs text-gray-600 mt-2">
@@ -159,7 +162,7 @@
                         </div>
 
                         <!-- Tasa de interés -->
-                        <div>
+                        <div class="campo-grupo" id="grupo_tasa_interes">
                             <label for="tasa_interes" class="block text-sm font-semibold text-gray-800 mb-2">
                                 Tasa de interés (%)
                             </label>
@@ -319,6 +322,23 @@
                                         </p>
                                     @endif
                                 </div>
+                            @elseif($modo === 'tasa_interes')
+                                <div class="bg-white rounded-lg border border-slate-200 p-3 text-sm space-y-1">
+                                    <p class="text-xs text-slate-500 uppercase font-semibold mb-1">Tasa de interés (i)</p>
+                                    <p class="text-lg font-semibold text-orange-700">
+                                        {{ isset($resultado['tasa_interes']) ? number_format($resultado['tasa_interes'] * 100, 6) : '' }}% por período
+                                    </p>
+                                    @if(isset($resultado['num_iteraciones']))
+                                        <p class="text-xs text-slate-600">
+                                            Convergió en {{ $resultado['num_iteraciones'] }} iteraciones (Newton-Raphson)
+                                        </p>
+                                    @endif
+                                    @if(isset($resultado['convergencia']))
+                                        <p class="text-xs text-slate-600 {{ str_contains($resultado['convergencia'], 'exitosamente') ? 'text-green-600' : 'text-amber-600' }}">
+                                            {{ $resultado['convergencia'] }}
+                                        </p>
+                                    @endif
+                                </div>
                             @endif
 
                             @if(!empty($pasos))
@@ -418,10 +438,11 @@
             const tipo = document.getElementById('tipo_calculo')?.value;
             const grupoMonto = document.getElementById('grupo_monto_pago');
             const grupoVP = document.getElementById('grupo_valor_presente');
+            const grupoTasa = document.getElementById('grupo_tasa_interes');
             const grupoN = document.getElementById('grupo_numero_pagos');
             const grupoK = document.getElementById('grupo_periodos_diferidos');
 
-            if (!tipo || !grupoMonto || !grupoVP || !grupoN || !grupoK) {
+            if (!tipo || !grupoMonto || !grupoVP || !grupoTasa || !grupoN || !grupoK) {
                 return;
             }
 
@@ -429,32 +450,44 @@
                 // Calcular Capital: necesita R, i, n, k
                 grupoMonto.classList.remove('hidden');
                 grupoVP.classList.add('hidden');
+                grupoTasa.classList.remove('hidden');
                 grupoN.classList.remove('hidden');
                 grupoK.classList.remove('hidden');
             } else if (tipo === 'monto') {
                 // Calcular Monto: necesita R, i, n (NO necesita k)
                 grupoMonto.classList.remove('hidden');
                 grupoVP.classList.add('hidden');
+                grupoTasa.classList.remove('hidden');
                 grupoN.classList.remove('hidden');
                 grupoK.classList.add('hidden');
             } else if (tipo === 'pago') {
                 // Calcular Pago: necesita C, i, n, k
                 grupoMonto.classList.add('hidden');
                 grupoVP.classList.remove('hidden');
+                grupoTasa.classList.remove('hidden');
                 grupoN.classList.remove('hidden');
                 grupoK.classList.remove('hidden');
             } else if (tipo === 'numero_pagos') {
                 // Calcular Número de Pagos: necesita C, R, i, k
                 grupoMonto.classList.remove('hidden');
                 grupoVP.classList.remove('hidden');
+                grupoTasa.classList.remove('hidden');
                 grupoN.classList.add('hidden');
                 grupoK.classList.remove('hidden');
             } else if (tipo === 'periodos_diferidos') {
                 // Calcular Períodos Diferidos: necesita C, R, i, n
                 grupoMonto.classList.remove('hidden');
                 grupoVP.classList.remove('hidden');
+                grupoTasa.classList.remove('hidden');
                 grupoN.classList.remove('hidden');
                 grupoK.classList.add('hidden');
+            } else if (tipo === 'tasa_interes') {
+                // Calcular Tasa de Interés: necesita C, R, n, k (NO necesita i, se calcula)
+                grupoMonto.classList.remove('hidden');
+                grupoVP.classList.remove('hidden');
+                grupoTasa.classList.add('hidden');  // ✅ OCULTAR porque se va a calcular
+                grupoN.classList.remove('hidden');
+                grupoK.classList.remove('hidden');
             }
         }
 
