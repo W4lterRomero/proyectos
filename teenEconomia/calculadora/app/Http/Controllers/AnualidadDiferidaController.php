@@ -117,28 +117,35 @@ class AnualidadDiferidaController extends Controller
         $validated = $request->validate($reglas);
         $validated['tipo_calculo'] = $tipoCalculo;
 
-        // Conversión de la tasa usando el servicio
-        $tasaIngresada = (float) $validated['tasa_interes'];
-        $tipoTasa = $validated['tipo_tasa'] ?? 'por_periodo';
+        // Preparar información de tasa. Si se calcula la tasa, no habrá entrada de tasa_interes.
+        $tasaInfo = null;
+        $tasaInteres = null;
+        $tasaIngresada = null;
 
-        try {
-            $tasaInfo = $this->tasaService->convertirTasaAPeriodo($tasaIngresada, $tipoTasa);
-            $tasaInteres = $tasaInfo['tasa_periodo'];
-        } catch (\InvalidArgumentException $e) {
-            return back()
-                ->withInput()
-                ->withErrors(['tasa_interes' => $e->getMessage()]);
+        if ($tipoCalculo !== 'tasa_interes') {
+            $tasaIngresada = (float) $validated['tasa_interes'];
+            $tipoTasa = $validated['tipo_tasa'] ?? 'por_periodo';
+
+            try {
+                $tasaInfo = $this->tasaService->convertirTasaAPeriodo($tasaIngresada, $tipoTasa);
+                $tasaInteres = $tasaInfo['tasa_periodo'];
+            } catch (\InvalidArgumentException $e) {
+                return back()
+                    ->withInput()
+                    ->withErrors(['tasa_interes' => $e->getMessage()]);
+            }
         }
 
-        $resultado = [
-            'modo' => $tipoCalculo,
-            'tasa_detalle' => [
+        $resultado = ['modo' => $tipoCalculo];
+
+        if ($tasaInfo) {
+            $resultado['tasa_detalle'] = [
                 'tipo' => $tasaInfo['tipo'],
                 'descripcion' => $tasaInfo['descripcion'],
                 'tasa_ingresada' => $tasaIngresada,
                 'tasa_periodo' => round($tasaInteres * 100, 6),
-            ],
-        ];
+            ];
+        }
 
         $pasos = [];
 
