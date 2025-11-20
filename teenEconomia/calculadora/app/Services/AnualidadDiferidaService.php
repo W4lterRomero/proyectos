@@ -314,6 +314,17 @@ class AnualidadDiferidaService
             throw new \InvalidArgumentException('Los períodos diferidos (k) no pueden ser negativos.');
         }
 
+        // Validación matemática: el pago total debe ser mayor que el capital
+        // Si R*n <= C, no existe tasa de interés positiva que satisfaga la ecuación
+        if ($r * $n <= $c) {
+            throw new \DomainException(
+                'Los datos no permiten calcular una tasa de interés válida. ' .
+                'El pago total (R × n = $' . number_format($r * $n, 2) . ') ' .
+                'debe ser significativamente mayor que el capital (C = $' . number_format($c, 2) . '). ' .
+                'Aumente el monto de pago (R) o el número de pagos (n), o reduzca el capital (C).'
+            );
+        }
+
         // Estimación inicial: usar una tasa razonable del 5%
         $i = 0.05;
 
@@ -332,6 +343,15 @@ class AnualidadDiferidaService
             // Calcular derivada usando diferencias finitas
             $h = 0.00000001;
             $fPrima = $this->calcularDerivadaVP($r, $n, $k, $i, $h);
+
+            // Validar que los valores calculados sean finitos
+            if (!is_finite($vpCalculado) || !is_finite($f) || !is_finite($fPrima)) {
+                throw new \DomainException(
+                    'Se detectaron valores no válidos durante el cálculo de la tasa. ' .
+                    'Los datos ingresados podrían no permitir una solución matemática válida. ' .
+                    'Verifique que el pago total (R × n) sea mayor que el capital (C).'
+                );
+            }
 
             // Guardar iteración
             $iteraciones[] = [
@@ -391,6 +411,16 @@ class AnualidadDiferidaService
         }
 
         // Si llegamos aquí, se alcanzó el máximo de iteraciones
+        // Validar que el resultado final sea válido antes de retornar
+        if (!is_finite($i) || $i <= 0 || $i > 1.0) {
+            throw new \DomainException(
+                'El método de Newton-Raphson no pudo converger a una tasa válida. ' .
+                'Los datos ingresados podrían ser inconsistentes. ' .
+                'Verifique que el pago total (R × n = $' . number_format($r * $n, 2) . ') ' .
+                'sea mayor que el capital (C = $' . number_format($c, 2) . ').'
+            );
+        }
+
         return [
             'tasa' => $i,
             'iteraciones' => $iteraciones,
@@ -435,6 +465,14 @@ class AnualidadDiferidaService
         $vpMas = $this->calcularVPConTasa($r, $n, $k, $i + $h);
         $vpMenos = $this->calcularVPConTasa($r, $n, $k, $i - $h);
 
-        return ($vpMas - $vpMenos) / (2 * $h);
+        $derivada = ($vpMas - $vpMenos) / (2 * $h);
+
+        // Validar que la derivada sea finita
+        if (!is_finite($derivada)) {
+            // Retornar un valor muy pequeño para evitar división por cero
+            return 1e-10;
+        }
+
+        return $derivada;
     }
 }

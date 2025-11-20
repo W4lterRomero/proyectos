@@ -15,9 +15,11 @@ services:
       - key: APP_KEY
         sync: false
       - key: LOG_CHANNEL
-        value: errorlog
+        value: stack
+      - key: LOG_STACK
+        value: single
       - key: LOG_LEVEL
-        value: info
+        value: debug
       - key: SESSION_DRIVER
         value: file
       - key: CACHE_STORE
